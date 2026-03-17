@@ -2,7 +2,9 @@ package com.rookies5.MySpringbootLab.service;
 
 import com.rookies5.MySpringbootLab.dto.BookDTO;
 import com.rookies5.MySpringbootLab.entity.Book;
+import com.rookies5.MySpringbootLab.entity.BookDetail;
 import com.rookies5.MySpringbootLab.exception.BusinessException;
+import com.rookies5.MySpringbootLab.repository.BookDetailRepository;
 import com.rookies5.MySpringbootLab.repository.BookRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -13,72 +15,138 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor // final이 붙은 필드의 생성자를 알아서 만들어줍니다. (의존성 주입)
-@Transactional(readOnly = true) // 기본적으로 읽기 전용으로 설정하여 성능을 높입니다.
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class BookService {
 
     private final BookRepository bookRepository;
+    private final BookDetailRepository bookDetailRepository;
 
-    // 1. 모든 도서 조회
-    public List<BookDTO.BookResponse> getAllBooks() {
+    public List<BookDTO.Response> getAllBooks() {
         return bookRepository.findAll().stream()
-                .map(book -> BookDTO.BookResponse.from(book))
+                .map(BookDTO.Response::fromEntity)
                 .collect(Collectors.toList());
     }
 
-    // 2. ID로 도서 조회
-    public BookDTO.BookResponse getBookById(Long id) {
-        Book book = bookRepository.findById(id)
-                .orElseThrow(() -> new BusinessException("해당 ID의 도서를 찾을 수 없습니다: " + id, HttpStatus.NOT_FOUND));
-        return BookDTO.BookResponse.from(book);
+    public BookDTO.Response getBookById(Long id) {
+        Book book = bookRepository.findByIdWithBookDetail(id)
+                .orElseThrow(() -> new BusinessException("도서를 찾을 수 없습니다: " + id, HttpStatus.NOT_FOUND));
+        return BookDTO.Response.fromEntity(book);
     }
 
-    // 3. ISBN으로 도서 조회
-    public BookDTO.BookResponse getBookByIsbn(String isbn) {
-        Book book = bookRepository.findByIsbn(isbn)
-                .orElseThrow(() -> new BusinessException("해당 ISBN의 도서를 찾을 수 없습니다: " + isbn, HttpStatus.NOT_FOUND));
-        return BookDTO.BookResponse.from(book);
+    public BookDTO.Response getBookByIsbn(String isbn) {
+        Book book = bookRepository.findByIsbnWithBookDetail(isbn)
+                .orElseThrow(() -> new BusinessException("도서를 찾을 수 없습니다: " + isbn, HttpStatus.NOT_FOUND));
+        return BookDTO.Response.fromEntity(book);
     }
 
-    // 4. 새 도서 등록 (데이터가 변경되므로 @Transactional 필수)
+    public List<BookDTO.Response> searchByAuthor(String author) {
+        return bookRepository.findByAuthorContainingIgnoreCase(author).stream()
+                .map(BookDTO.Response::fromEntity).collect(Collectors.toList());
+    }
+
+    public List<BookDTO.Response> searchByTitle(String title) {
+        return bookRepository.findByTitleContainingIgnoreCase(title).stream()
+                .map(BookDTO.Response::fromEntity).collect(Collectors.toList());
+    }
+
     @Transactional
-    public BookDTO.BookResponse createBook(BookDTO.BookCreateRequest request) {
-        Book book = request.toEntity();
-        Book savedBook = bookRepository.save(book);
-        return BookDTO.BookResponse.from(savedBook);
+    public BookDTO.Response createBook(BookDTO.Request request) {
+        if (bookRepository.existsByIsbn(request.getIsbn())) {
+            throw new BusinessException("이미 존재하는 ISBN 입니다: " + request.getIsbn(), HttpStatus.CONFLICT);
+        }
+
+        // 1. Book 기본 정보 조립
+        Book book = Book.builder()
+                .title(request.getTitle())
+                .author(request.getAuthor())
+                .isbn(request.getIsbn())
+                .price(request.getPrice())
+                .publishDate(request.getPublishDate())
+                .build();
+
+        // 2. 상세 정보가 들어왔다면 BookDetail 조립
+        if (request.getDetailRequest() != null) {
+            BookDetail detail = BookDetail.builder()
+                    .description(request.getDetailRequest().getDescription())
+                    .language(request.getDetailRequest().getLanguage())
+                    .pageCount(request.getDetailRequest().getPageCount())
+                    .publisher(request.getDetailRequest().getPublisher())
+                    .coverImageUrl(request.getDetailRequest().getCoverImageUrl())
+                    .edition(request.getDetailRequest().getEdition())
+                    .build();
+            // 양방향 세팅! (이 코드가 있어야 DB에 외래키가 정상적으로 들어갑니다)
+            book.setBookDetail(detail);
+        }
+
+        Book savedBook = bookRepository.save(book); // Cascade 옵션 덕분에 한 번에 저장!
+        return BookDTO.Response.fromEntity(savedBook);
     }
 
-    // 5. 도서 정보 수정 (요구사항 반영: 입력값이 있는 경우에만 수정!)
+    // 통째로 덮어씌우는 PUT 수정
     @Transactional
-    public BookDTO.BookResponse updateBook(Long id, BookDTO.BookUpdateRequest request) {
-        // 1. 먼저 DB에서 기존 책을 꺼내옵니다.
-        Book existBook = bookRepository.findById(id)
-                .orElseThrow(() -> new BusinessException("수정할 도서를 찾을 수 없습니다: " + id, HttpStatus.NOT_FOUND));
+    public BookDTO.Response updateBook(Long id, BookDTO.Request request) {
+        Book book = bookRepository.findByIdWithBookDetail(id)
+                .orElseThrow(() -> new BusinessException("도서를 찾을 수 없습니다: " + id, HttpStatus.NOT_FOUND));
 
-        // 2. 변경이 필요한 필드만 업데이트 (null이 아닐 때만 덮어씌움)
-        if (request.getTitle() != null) {
-            existBook.setTitle(request.getTitle());
-        }
-        if (request.getAuthor() != null) {
-            existBook.setAuthor(request.getAuthor());
-        }
-        if (request.getPrice() != null) {
-            existBook.setPrice(request.getPrice());
-        }
-        if (request.getPublishDate() != null) {
-            existBook.setPublishDate(request.getPublishDate());
+        validateIsbnDuplicate(book, request.getIsbn());
+
+        book.setTitle(request.getTitle());
+        book.setAuthor(request.getAuthor());
+        book.setIsbn(request.getIsbn());
+        book.setPrice(request.getPrice());
+        book.setPublishDate(request.getPublishDate());
+
+        if (request.getDetailRequest() != null && book.getBookDetail() != null) {
+            book.getBookDetail().setDescription(request.getDetailRequest().getDescription());
+            book.getBookDetail().setLanguage(request.getDetailRequest().getLanguage());
+            book.getBookDetail().setPageCount(request.getDetailRequest().getPageCount());
+            book.getBookDetail().setPublisher(request.getDetailRequest().getPublisher());
+            book.getBookDetail().setCoverImageUrl(request.getDetailRequest().getCoverImageUrl());
+            book.getBookDetail().setEdition(request.getDetailRequest().getEdition());
         }
 
-        // JPA의 변경 감지(Dirty Checking) 기능 덕분에 save()를 따로 호출하지 않아도 
-        // 트랜잭션이 끝날 때 알아서 DB에 UPDATE 쿼리가 날아갑니다!
-        return BookDTO.BookResponse.from(existBook);
+        return BookDTO.Response.fromEntity(book);
     }
 
-    // 6. 도서 삭제
+    // 💡 부분 수정 PATCH (Null이 아닌 것만 덮어씌움)
+    @Transactional
+    public BookDTO.Response patchBook(Long id, BookDTO.PatchRequest request) {
+        Book book = bookRepository.findByIdWithBookDetail(id)
+                .orElseThrow(() -> new BusinessException("도서를 찾을 수 없습니다: " + id, HttpStatus.NOT_FOUND));
+
+        if (request.getIsbn() != null) validateIsbnDuplicate(book, request.getIsbn());
+
+        if (request.getTitle() != null) book.setTitle(request.getTitle());
+        if (request.getAuthor() != null) book.setAuthor(request.getAuthor());
+        if (request.getIsbn() != null) book.setIsbn(request.getIsbn());
+        if (request.getPrice() != null) book.setPrice(request.getPrice());
+        if (request.getPublishDate() != null) book.setPublishDate(request.getPublishDate());
+
+        if (request.getDetailRequest() != null && book.getBookDetail() != null) {
+            BookDTO.BookDetailPatchRequest detailReq = request.getDetailRequest();
+            if (detailReq.getDescription() != null) book.getBookDetail().setDescription(detailReq.getDescription());
+            if (detailReq.getLanguage() != null) book.getBookDetail().setLanguage(detailReq.getLanguage());
+            if (detailReq.getPageCount() != null) book.getBookDetail().setPageCount(detailReq.getPageCount());
+            if (detailReq.getPublisher() != null) book.getBookDetail().setPublisher(detailReq.getPublisher());
+            if (detailReq.getCoverImageUrl() != null) book.getBookDetail().setCoverImageUrl(detailReq.getCoverImageUrl());
+            if (detailReq.getEdition() != null) book.getBookDetail().setEdition(detailReq.getEdition());
+        }
+
+        return BookDTO.Response.fromEntity(book);
+    }
+
+    // 💡 ISBN 중복 체크 분리 메서드
+    private void validateIsbnDuplicate(Book book, String newIsbn) {
+        if (!book.getIsbn().equals(newIsbn) && bookRepository.existsByIsbn(newIsbn)) {
+            throw new BusinessException("이미 사용중인 ISBN 입니다: " + newIsbn, HttpStatus.CONFLICT);
+        }
+    }
+
     @Transactional
     public void deleteBook(Long id) {
         Book book = bookRepository.findById(id)
-                .orElseThrow(() -> new BusinessException("삭제할 도서를 찾을 수 없습니다: " + id, HttpStatus.NOT_FOUND));
+                .orElseThrow(() -> new BusinessException("도서를 찾을 수 없습니다: " + id, HttpStatus.NOT_FOUND));
         bookRepository.delete(book);
     }
 }

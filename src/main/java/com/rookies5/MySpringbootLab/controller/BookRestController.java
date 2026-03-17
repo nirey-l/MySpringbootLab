@@ -12,37 +12,50 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/books")
-@RequiredArgsConstructor // Service를 주입받기 위해 사용합니다.
+@RequiredArgsConstructor
 public class BookRestController {
 
     private final BookService bookService;
 
     @GetMapping
-    public ResponseEntity<List<BookDTO.BookResponse>> getAllBooks() {
+    public ResponseEntity<List<BookDTO.Response>> getAllBooks() {
         return ResponseEntity.ok(bookService.getAllBooks());
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<BookDTO.BookResponse> getBookById(@PathVariable Long id) {
+    public ResponseEntity<BookDTO.Response> getBookById(@PathVariable Long id) {
         return ResponseEntity.ok(bookService.getBookById(id));
     }
 
     @GetMapping("/isbn/{isbn}")
-    public ResponseEntity<BookDTO.BookResponse> getBookByIsbn(@PathVariable String isbn) {
+    public ResponseEntity<BookDTO.Response> getBookByIsbn(@PathVariable String isbn) {
         return ResponseEntity.ok(bookService.getBookByIsbn(isbn));
     }
 
+    @GetMapping("/search/author")
+    public ResponseEntity<List<BookDTO.Response>> searchByAuthor(@RequestParam String author) {
+        return ResponseEntity.ok(bookService.searchByAuthor(author));
+    }
+
+    @GetMapping("/search/title")
+    public ResponseEntity<List<BookDTO.Response>> searchByTitle(@RequestParam String title) {
+        return ResponseEntity.ok(bookService.searchByTitle(title));
+    }
+
     @PostMapping
-    // 💡 @Valid를 붙여서 BookCreateRequest에 설정한 규칙(@NotBlank 등)을 검사합니다!
-    public ResponseEntity<BookDTO.BookResponse> createBook(@Valid @RequestBody BookDTO.BookCreateRequest request) {
-        BookDTO.BookResponse response = bookService.createBook(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    public ResponseEntity<BookDTO.Response> createBook(@Valid @RequestBody BookDTO.Request request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(bookService.createBook(request));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<BookDTO.BookResponse> updateBook(@PathVariable Long id, @Valid @RequestBody BookDTO.BookUpdateRequest request) {
-        BookDTO.BookResponse response = bookService.updateBook(id, request);
-        return ResponseEntity.ok(response);
+    public ResponseEntity<BookDTO.Response> updateBook(@PathVariable Long id, @Valid @RequestBody BookDTO.Request request) {
+        return ResponseEntity.ok(bookService.updateBook(id, request));
+    }
+
+    // 💡 부분 수정 요청(PATCH)
+    @PatchMapping("/{id}")
+    public ResponseEntity<BookDTO.Response> patchBook(@PathVariable Long id, @RequestBody BookDTO.PatchRequest request) {
+        return ResponseEntity.ok(bookService.patchBook(id, request));
     }
 
     @DeleteMapping("/{id}")

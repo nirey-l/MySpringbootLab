@@ -2,19 +2,16 @@ package com.rookies5.MySpringbootLab.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalDate;
 
 @Entity
 @Table(name = "books")
-@Getter
-@Setter // 테스트에서 값을 수정(Update)하기 위해 추가합니다.
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
+@Getter @Setter
+@NoArgsConstructor @AllArgsConstructor @Builder
 public class Book {
-
-    @Id // 이 필드가 테이블의 기본 키(Primary Key)임을 알립니다.
-    @GeneratedValue(strategy = GenerationType.IDENTITY) // DB가 번호를 자동으로 1씩 증가시키도록 합니다 (Auto Increment).
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     private String title;
@@ -22,4 +19,17 @@ public class Book {
     private String isbn;
     private Integer price;
     private LocalDate publishDate;
+
+    // mappedBy = "book": "나는 주인이 아니야. 저쪽 BookDetail의 'book' 변수가 진짜 외래키를 관리해"
+    // CascadeType.ALL: Book을 저장/삭제할 때 짝꿍인 BookDetail도 알아서 같이 저장/삭제해!
+    @OneToOne(mappedBy = "book", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private BookDetail bookDetail;
+
+    // 💡 양방향 관계를 안전하게 맺어주기 위한 편의 메서드입니다.
+    public void setBookDetail(BookDetail bookDetail) {
+        this.bookDetail = bookDetail;
+        if (bookDetail != null) {
+            bookDetail.setBook(this); // 서로를 바라보게 세팅!
+        }
+    }
 }

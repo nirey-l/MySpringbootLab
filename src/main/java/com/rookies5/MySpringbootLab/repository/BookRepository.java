@@ -2,15 +2,25 @@ package com.rookies5.MySpringbootLab.repository;
 
 import com.rookies5.MySpringbootLab.entity.Book;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
 import java.util.List;
 import java.util.Optional;
 
-// JpaRepository<관리할 엔티티 클래스, 그 엔티티의 PK(ID) 타입> 을 상속받습니다.
 public interface BookRepository extends JpaRepository<Book, Long> {
 
-    // 1. ISBN으로 도서 찾기 (결과가 없거나 1개이므로 Optional 사용)
-    Optional<Book> findByIsbn(String isbn);
+    // JOIN FETCH를 사용하여 Book을 찾을 때 BookDetail도 한 번의 쿼리로 같이 가져옵니다.
+    @Query("SELECT b FROM Book b LEFT JOIN FETCH b.bookDetail WHERE b.id = :id")
+    Optional<Book> findByIdWithBookDetail(@Param("id") Long id);
 
-    // 2. 저자명으로 도서 찾기 (홍길동이 쓴 책이 여러 권일 수 있으므로 List 사용)
-    List<Book> findByAuthor(String author);
+    @Query("SELECT b FROM Book b LEFT JOIN FETCH b.bookDetail WHERE b.isbn = :isbn")
+    Optional<Book> findByIsbnWithBookDetail(@Param("isbn") String isbn);
+
+    Optional<Book> findByIsbn(String isbn);
+    boolean existsByIsbn(String isbn); // ISBN 중복 체크용
+
+    // 저자나 제목에 특정 단어가 포함된 책 찾기 (대소문자 무시)
+    List<Book> findByAuthorContainingIgnoreCase(String author);
+    List<Book> findByTitleContainingIgnoreCase(String title);
 }
